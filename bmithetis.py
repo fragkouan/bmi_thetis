@@ -115,7 +115,7 @@ class BmiThetis(Bmi):
         from bmi_tools import BathymetryTools, SetupTools, ThetisTools
         from bmi_tools import WCITools, CoordsTools, TideTools, MPITools
         from bmi_tools import IOTools, WindTools, BCTools, FinaliseTools
-        from bmi_tools import ForcingTools
+        from bmi_tools import ForcingTools, WEoCTools
         from pathlib import Path
 
         # Load configuration file
@@ -183,6 +183,10 @@ class BmiThetis(Bmi):
         if "WCI" in self.config:
             WCITools.configure_wci(self)
 
+        # Wave-Effects on Currents (Offline Coupling)
+        if "WEoC" in self.config:
+            WEoCTools.configure_weoc_forcing(self)
+
         # Configure 2-D flowsolver for Shallow-Water Equations
         ThetisTools.create_flowsolver(self)
 
@@ -241,21 +245,20 @@ class BmiThetis(Bmi):
         # Get the current time is seconds
         cputimestamp = time_mod.perf_counter()
 
-        # If WCI is accounted for
-        if "WCI" in self.config:
-            # If the coupling is both ways or from SWAN to Thetis
-            if (
-                    self.coupl_stat == "2-way" or
-                    self.coupl_stat == "SWAN-to-Thetis"
-            ):
-                # Update the Wave Effects On Currents
-                self.weoc.update(
-                    hs_wave=self.hs,
-                    dir_wave=self.dir,
-                    l_wave=self.wlen,
-                    qb=self.qb,
-                    c1=self.ramp_coeff
-                )
+        # If the coupling is both ways or from SWAN to Thetis
+        if (
+                self.coupl_stat == "2-way" or
+                self.coupl_stat == "SWAN-to-Thetis" or
+                "WEoC" in self.config
+        ):
+            # Update the Wave Effects On Currents
+            self.weoc.update(
+                hs_wave=self.hs,
+                dir_wave=self.dir,
+                l_wave=self.wlen,
+                qb=self.qb,
+                c1=self.ramp_coeff
+            )
 
         # Advance the equation for one timestep
         self.solver_obj.timestepper.advance(
@@ -342,9 +345,6 @@ class BmiThetis(Bmi):
                         self.wlen_diff * Constant(self.wave_interp_counter) + \
                         self.wlen_old
                     )
-                    # print(f"Hs{np.amin(self.hs.dat.data):.3f},{np.amax(self.hs.dat.data):.3f}")
-                    # print(f"Hs_old{np.amin(self.hs_old.dat.data):.3f},{np.amax(self.hs_old.dat.data):.3f}")
-                    # print(f"Hs_new{np.amin(self.hs_new.dat.data):.3f},{np.amax(self.hs_new.dat.data):.3f}")
 
                     # Update counter of wave characteristic interpolation
                     self.wave_interp_counter = self.wave_interp_counter + 1
@@ -358,56 +358,60 @@ class BmiThetis(Bmi):
                         c1=self.ramp_coeff
                     )
 
+            if "WEoC" in self.config:
+                # Update the Wave Effects On Currents
+                self.weoc.update(
+                    hs_wave=self.hs,
+                    dir_wave=self.dir,
+                    l_wave=self.wlen,
+                    qb=self.qb,
+                    c1=self.ramp_coeff
+                )
+
         ## Specify the wave characteristics for the 1st update
-        # If WCI is accounted for
-        if "WCI" in self.config:
-            # If the coupling is both ways or from SWAN to Thetis
-            if (
-                    self.coupl_stat == "2-way" or
-                    self.coupl_stat == "SWAN-to-Thetis"
-            ):
+        # If the coupling is both ways or from SWAN to Thetis
+        if (
+                self.coupl_stat == "2-way" or
+                self.coupl_stat == "SWAN-to-Thetis"
+        ):
                 # If the wave fields need to be interpolates
-                if self.wave_char_interp:
-                    # STart counter
-                    self.wave_interp_counter = 1
-                    # Calculate the "step" of each wave characteristic at each
-                    # point
-                    self.hs_diff.interpolate(
-                        Constant(1 / self.no_wave_interp) * \
-                        (self.hs_new - self.hs_old)
-                    )
-                    self.dir_diff.interpolate(
-                        Constant(1 / self.no_wave_interp) * \
-                        (self.dir_new - self.dir_old)
-                    )
-                    self.wlen_diff.interpolate(
-                        Constant(1 / self.no_wave_interp) * \
-                        (self.wlen_new - self.wlen_old)
-                    )
-                    self.qb_diff.interpolate(
-                        Constant(1 / self.no_wave_interp) * \
-                        (self.qb_new - self.qb_old)
-                    )
+            if self.wave_char_interp:
+                # STart counter
+                self.wave_interp_counter = 1
+                # Calculate the "step" of each wave characteristic at each
+                # point
+                self.hs_diff.interpolate(
+                    Constant(1 / self.no_wave_interp) * \
+                    (self.hs_new - self.hs_old)
+                )
+                self.dir_diff.interpolate(
+                    Constant(1 / self.no_wave_interp) * \
+                    (self.dir_new - self.dir_old)
+                )
+                self.wlen_diff.interpolate(
+                    Constant(1 / self.no_wave_interp) * \
+                    (self.wlen_new - self.wlen_old)
+                )
+                self.qb_diff.interpolate(
+                    Constant(1 / self.no_wave_interp) * \
+                    (self.qb_new - self.qb_old)
+                )
 
-                    # Calculate the new value of wave characteristics
-                    self.hs.interpolate(self.hs_old + self.hs_diff)
-                    # print(f"Hs_old{np.amin(self.hs_old.dat.data):.3f},{np.amax(self.hs_old.dat.data):.3f}")
-                    # print(f"Hs{np.amin(self.hs.dat.data):.3f},{np.amax(self.hs.dat.data):.3f}")
-                    # print(self.ramp_coeff)
-                    # print("   ")
-                    self.dir.interpolate(self.dir_old + self.dir_diff)
-                    self.qb.interpolate(self.qb_old + self.qb_diff)
-                    self.wlen.interpolate(self.wlen_old + self.wlen_diff)
+                # Calculate the new value of wave characteristics
+                self.hs.interpolate(self.hs_old + self.hs_diff)
+                self.dir.interpolate(self.dir_old + self.dir_diff)
+                self.qb.interpolate(self.qb_old + self.qb_diff)
+                self.wlen.interpolate(self.wlen_old + self.wlen_diff)
 
-                    # Update counter
-                    self.wave_interp_counter = self.wave_interp_counter + 1
+                # Update counter
+                self.wave_interp_counter = self.wave_interp_counter + 1
 
-                # If Thetis dt = coupling dt
-                else:
-                    self.hs = self.hs_new
-                    self.dir = self.dir_new
-                    self.wlen = self.wlen_new
-                    self.qb = self.qb_new
+            # If Thetis dt = coupling dt
+            else:
+                self.hs = self.hs_new
+                self.dir = self.dir_new
+                self.wlen = self.wlen_new
+                self.qb = self.qb_new
 
         self.update()
 
@@ -420,25 +424,23 @@ class BmiThetis(Bmi):
             self.solver_obj.options.simulation_end_time = float(t_end)
             self.solver_obj.iterate_coupled(update_forcings=update_forcings)
 
-        # If WCI is accounted for
-        if "WCI" in self.config:
-            # If the coupling is both ways or from SWAN to Thetis
-            if (
-                    self.coupl_stat == "2-way" or
-                    self.coupl_stat == "Thetis-to-SWAN"
-            ):
-                WCITools.calculate_output_fields(self)
+        # If the coupling is both ways or from SWAN to Thetis
+        if (
+                self.coupl_stat == "2-way" or
+                self.coupl_stat == "Thetis-to-SWAN"
+        ):
+            WCITools.calculate_output_fields(self)
 
-            # If SWAN passes information to Thetis
-            if (
+        # If SWAN passes information to Thetis
+        if (
                 self.coupl_stat == "2-way" or
                 self.coupl_stat == "SWAN-to-Thetis"
-            ):
-                # Pass the "new" value, i.e. the final value to the old array
-                self.hs_old.interpolate(self.hs_new)
-                self.dir_old.interpolate(self.dir_new)
-                self.qb_old.interpolate(self.qb_new)
-                self.wlen_old.interpolate(self.wlen_new)
+        ):
+            # Pass the "new" value, i.e. the final value to the old array
+            self.hs_old.interpolate(self.hs_new)
+            self.dir_old.interpolate(self.dir_new)
+            self.qb_old.interpolate(self.qb_new)
+            self.wlen_old.interpolate(self.wlen_new)
 
         self.comm.Barrier()
 

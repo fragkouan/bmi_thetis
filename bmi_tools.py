@@ -345,6 +345,51 @@ class CoordsTools(BmiThetis):
 
         return
 
+    def get_mesh_coords_in_wave_char_crs(self, dict):
+        """
+        Get the mesh coordinates in the EPSG utilised in the netcdf containing
+        the wave characteristics. If the EPSG is not available in the coordina-
+        te dictionary, terminate Thetos
+        Inputs:
+        self:
+        dict : A dictionary containing the coordinates parameters of the eta
+               netcdf
+
+        Outputs:
+        None
+
+        Returns:
+        self.wave_coords : 2-D array containing the mesh coordinates in the
+                           EPSG of the eta netcdf
+        """
+        # If the wind forcing utilise the same epsg as the mesh
+        if dict["epsg"] == self.config["mesh parameters"]["epsg"]:
+            self.wave_coords = self.yx
+
+        # If the wind netcdf utilises a different than the mesh
+        else:
+            # If the coordinates are available in the coordinates dictionary
+            if int(dict["epsg"]) in list(self.coord_dict.keys()):
+                self.wave_coords = np.column_stack(
+                    (
+                        self.coord_dict[int(dict["epsg"])]["y-coords"],
+                        self.coord_dict[int(dict["epsg"])]["y-coords"]
+                    )
+                )
+
+            # If the coordinates aren't available, terminate Thetis
+            else:
+                message = clrtxt.bold + clrtxt.red + "Terminating Thetis: " + \
+                    clrtxt.end + "The EPSG" + clrtxt.bold + clrtxt.darkcyan + \
+                    " " + str(dict["epsg"]) + clrtxt.end + " is not " + \
+                    "available in the coordinates dictionary. Please add " + \
+                    "the necessary coordinate conversion under the entry " + \
+                    "' " + clrtxt.bold + clrtxt.darkcyan + "coordinates " + \
+                    "conversion" + clrtxt.end + "'."
+                raise SystemExit(message)
+
+        return
+
 
     def get_mesh_coords_in_TPXO_crs(self, boundary_ids=None, TPXO_forcing=False):
         """
@@ -1360,7 +1405,44 @@ class IOTools(BmiThetis):
 
         return x_data, y_data, t_data, z1_data, z2_data
 
+    def import_transient_regular_scalar_nc(
+            self, filename, x_name, y_name, t_name, z_name, t_type,
+            full_record
+    ):
+        """
 
+        """
+        from netCDF4 import Dataset
+
+        print_output('  * Reading NetCDF file')
+
+        # # Check that we have all the records of the rotated grid
+        # if not self.config["bathymetry parameters"]["full coords record"]:
+        #     message = clrtxt.bold + clrtxt.red + "Terminating Thetis: " + \
+        #         clrtxt.end + " When the netCDF grid is rotated, all the " + \
+        #         "coordinates of the netCDF must be included, i.e. the " + \
+        #         clrtxt.bold + clrtxt.darkcyan + "'full coords record'" + \
+        #         clrtxt.end + " has to be " + clrtxt.bold + clrtxt.darkcyan + \
+        #         "true" + clrtxt.end
+        #     raise SystemExit(message)
+
+        # Open file
+        nc = Dataset(filename)
+        # Extract coordinates
+        x_data = nc.variables[x_name][:].astype('float64')
+        y_data = nc.variables[y_name][:].astype('float64')
+        # Extract time
+        t_data = nc.variables[t_name][:].astype(t_type)
+        # Extract vector information
+        z_data = nc.variables[z_name][:].astype('float64')
+
+        # If the netCDF contains all the coordinates of the structured grid
+        if full_record:
+            # Get only the values which the structured grid is comprised
+            x_data = x_data[0, :]
+            y_data = y_data[:, 0]
+
+        return x_data, y_data, t_data, z_data
 
 
     def load_json_file(self, filename):
@@ -1868,6 +1950,79 @@ class SetupTools(BmiThetis):
 
         return z1_int, z2_int
 
+    def create_transient_scalar_interpolator(
+            self, x_data, y_data, t_data, z_data, grid_type
+    ):
+        """
+        Depending on the grid type of the vector, call the appropriate method
+        to create the interpolator of the vector components x,y, across the 2-D
+        space (x, y) and in time (t)
+        Inputs
+        self :
+        x_data    :
+        y_data    :
+        t_data    :
+        z1_data   :
+        z2_data   :
+        grid_type :
+
+        Outputs:
+        None
+
+        Returns:
+        z1_int : Interpolator for the x-component of the vector
+        z2_int : Interpolator for the y-component of the vector
+
+        """
+        # If the grid of the vector isn't regular:
+        if grid_type:
+            print("THIS needs to be coded")
+            # interp = SetupTools.create_irregular_transient_scalar_interp(
+            #     self, x_data, y_data, t_data, z_data
+            # )
+
+        # Else if the grid is regular
+        else:
+            z_int = SetupTools.create_regular_transient_scalar_interp(
+                self, x_data, y_data, t_data, z_data
+            )
+
+        return z_int
+
+    def create_regular_transient_scalar_interp(
+            self, x_data, y_data, t_data, z_data
+    ):
+        """
+        Create a linear interpolation in 2-D space (x, y) and in time t for the
+        components of a vector. The grid of the vector is structured regular.
+        Inputs
+        self :
+        x_data  :
+        y_data  :
+        t_data  :
+        z1_data :
+        z2_data :
+
+        Outputs:
+        None
+
+        Returns:
+        z1_int : Interpolator for the x-component of the vector
+        z2_int : Interpolator for the y-component of the vector
+        """
+        from scipy.interpolate import RegularGridInterpolator
+
+        # Create the interpolator for x-component
+        z_int = RegularGridInterpolator(
+            (t_data, y_data, x_data),
+            z_data,
+            method='linear',
+            bounds_error=False,
+            fill_value=0.0
+        )
+
+
+        return z_int
 
 
     def define_function_spaces(self):
@@ -2627,25 +2782,35 @@ class ThetisTools(BmiThetis):
             self.solver_obj.add_callback(detector_callback, 'timestep')
 
         # Account for Wave-Effects on currents
-        if "WCI" in self.config:
-            # If the coupling is both ways or from SWAN-to-Thetis
-            if (
-                    self.coupl_stat == "2-way" or
-                    self.coupl_stat == "SWAN-to-Thetis"
-            ):
-                print_output("  * Add WCI")
-                # Create Object accounting for the Wave Effects on Currents
-                self.weoc = WaveEffectsOnCurrents(
-                    self.mesh2d,
-                    self.solver_obj.options,
-                    self.solver_obj.fields
+        # If the coupling is both ways or from SWAN-to-Thetis
+        if (
+                self.coupl_stat == "2-way" or
+                self.coupl_stat == "SWAN-to-Thetis" or
+                "WEoC" in self.config
+        ):
+            # Create Object accounting for the Wave Effects on Currents
+            self.weoc = WaveEffectsOnCurrents(
+                self.mesh2d,
+                self.solver_obj.options,
+                self.solver_obj.fields
+            )
+            if "WEoC" in self.config:
+                print_output("  * Add WEoC")
+                self.weoc.update(
+                    hs_wave=self.hs,
+                    dir_wave=self.dir,
+                    l_wave=self.wlen,
+                    qb=self.qb,
+                    c1=self.ramp_coeff
                 )
+            else:
+                print_output("  * Add WCI")
                 self.weoc.update(
                     hs_wave=self.hs_old,
                     dir_wave=self.dir_old,
                     l_wave=self.wlen_old,
                     qb=self.qb_old,
-                    c1 = self.ramp_coeff
+                    c1=self.ramp_coeff
                 )
 
         # Split solution
@@ -2724,32 +2889,31 @@ class ThetisTools(BmiThetis):
         # Load dictionary with initial conditions parameters
         dict = self.config["initial conditions"]
 
-        if "WCI" in self.config:
-            if (
-                    self.coupl_stat == "2-way" or
-                    self.coupl_stat == "SWAN-to-Thetis"
-            ):
-                if ( self.simul_kind == "ramp"):
-                    self.hs_old.dat.data[:] = 0.
-                    self.dir_old.dat.data[:] = 0.
-                    self.wlen_old.dat.data[:] = 0.
-                    self.qb_old.dat.data[:] = 0.
-                else:
-                    ## THIS NEEDS a CHECK to see thatwe have provided info
-                    dict_ = dict["import from file"]
+        if (
+                self.coupl_stat == "2-way" or
+                self.coupl_stat == "SWAN-to-Thetis"
+        ):
+            if (self.simul_kind == "ramp"):
+                self.hs_old.dat.data[:] = 0.
+                self.dir_old.dat.data[:] = 0.
+                self.wlen_old.dat.data[:] = 0.
+                self.qb_old.dat.data[:] = 0.
+            else:
+                ## THIS NEEDS a CHECK to see thatwe have provided info
+                dict_ = dict["import from file"]
 
-                    # Check if they are in the import_for_file dictionary
-                    for name in BmiThetis._ic_wave_names:
-                        # If one of the names is not in the
-                        if name not in dict_:
-                            mes = ct.br + "Terminating Thetis: " + ct.e + \
-                                  "Although WCI are included in the " + \
-                                  "'continue' simulation, the field " + \
-                                  ct.bdc + name + ct.e + " is not included" + \
-                                  " in the " + ct.bdc + "import from file " + \
-                                  ct.e + "in the " + ct.bdc + "initial " + \
-                                  "conditions " + ct.e + "entry."
-                            raise SystemExit(mes)
+                # Check if they are in the import_for_file dictionary
+                for name in BmiThetis._ic_wave_names:
+                    # If one of the names is not in the
+                    if name not in dict_:
+                        mes = ct.br + "Terminating Thetis: " + ct.e + \
+                              "Although WCI are included in the " + \
+                              "'continue' simulation, the field " + \
+                              ct.bdc + name + ct.e + " is not included" + \
+                              " in the " + ct.bdc + "import from file " + \
+                              ct.e + "in the " + ct.bdc + "initial " + \
+                              "conditions " + ct.e + "entry."
+                        raise SystemExit(mes)
 
 
 
@@ -4689,6 +4853,8 @@ class BCTools(BmiThetis):
             "TPXO forcing", # If the tide forcing is from the TPXO
             "constituents forcing", # If the tide forcing is constant,
             "AMCG forcing", # If the tde consitudents are in AMCG frmat
+            "wave_interpolator"  # For WEoC
+
         ]
         # The available options as function types
         BmiThetis._forcing_func_types = [
@@ -4725,6 +4891,8 @@ class BCTools(BmiThetis):
         for name in forc_names:
             # If the name is wind_stress_2d
             if name == "wind_stress_2d":
+                continue
+            if name == "wave":
                 continue
             # Check that the forcing function has been defined by the user
             if name not in func_names:
@@ -4884,6 +5052,9 @@ class BCTools(BmiThetis):
 
         elif item[1] == "constituents forcing":
             TideTools.update_tide_time_function(self, t, item)
+
+        elif item[1] == "wave_interpolator":
+            WEoCTools.interpolate_wave_char(self, t)
 
         return
 
@@ -5591,6 +5762,219 @@ class FinaliseTools(BmiThetis):
             time_info = None
 
         return time_info
+
+
+class WEoCTools(BmiThetis):
+    """
+
+    """
+    def __init__(self):
+        BmiThetis._format_options = [
+            "characteristics"
+        ]
+        BmiThetis._wave_labels_options = [
+            "hs label",
+            "wlen label",
+            "dir label",
+            "qb label"
+        ]
+
+    def configure_weoc_forcing(self):
+        """
+        Setup an interpolator (most likely) to account for the Wave Effects on
+        Currents.
+
+        Returns:
+
+        """
+        # Initialise WEoCTools class
+        WEoCTools()
+
+        # Load dictionary rearding the Wave Effects on Currents:
+        dict = self.config["WEoC"]
+
+        # Check that the format is approprita
+        if dict["format"] not in self._format_options:
+            mes = f"{ct.br}Terminating Thetis: {ct.e}The option {ct.bdc}" + \
+                  f"{dict['format']}{ct.e} is not a viable options for " + \
+                  f"WEoC forcing. Please choose one fo the following: " + \
+                  f"{ct.bdc}{str(self._format_options)[1:-1]}{ct.e}"
+            raise SystemExit(mes)
+
+        if dict["format"] == "characteristics":
+            WEoCTools.create_wave_char_interp(self, dict)
+
+
+    def create_wave_char_interp(self, dict):
+        """
+
+        Args:
+            dict:
+
+        Returns:
+
+        """
+        # Setup the functions for Hs, Dir, WLen and Qb
+        self.hs = Function(self.P1_2d, name="significant_wave_height")
+        self.dir = Function(self.P1_2d, name="mean_wave_direction")
+        self.wlen = Function(self.P1_2d, name="mean_wavelength")
+        self.qb = Function(self.P1_2d, name="wave_breaking_percentage")
+
+
+        # Check that we have all the labels
+        for label in BmiThetis._wave_labels_options:
+            if label not in dict:
+                mes = f"{ct.br}Terminating Thetis:{ct.e} The entry " + \
+                      f"{ct.bdc}{label}{ct.e} is not in the entry " + \
+                      f"{ct.bdc}WEoC{ct.e}. Please include it"
+                raise SystemExit(mes)
+
+        # If the Wave Effects on Currents are transient
+        if dict["transient field"]:
+            # Determine the start date of the wind stress
+            start_time = TimeTools.calculate_time_since_epoch(
+                self, dict["time information"]
+            )
+
+            # Get the coordinates to interpolate the uv forcings
+            CoordsTools.get_mesh_coords_in_wave_char_crs(
+                self, dict["coordinates information"]
+            )
+
+            WEoCTools.import_wave_char_from_transient_netCDF(
+                self, dict, start_time
+            )
+
+
+
+    def import_wave_char_from_transient_netCDF(self, dict, start_time):
+        """
+        Import the specified parameter form the netcdf
+        Args:
+            dict:
+            start_time:
+            label:
+
+        Returns:
+
+        """
+        # Specify the file to be opened
+        wave_fpath = dict["nc file"]
+
+        # Determine whether the time information in the netCDF is in the form
+        # of seconds since the epoch or in dates (i.e. strings)
+        t_type = TimeTools.get_nc_time_info_type(
+            self, dict["time information"]
+        )
+
+        for label in self._wave_labels_options:
+            # If the grid utilised isn't regular structured, i.e. it is rotated or
+            # it has not constant spacing or anything else
+            if dict["coordinates information"]["rotated grid"]:
+                x_data, y_data, t_data, z_data = \
+                    IOTools.import_transient_irregular_scalar_nc(
+                        self,
+                        wave_fpath,
+                        dict["coordinates information"]["x-coords label"],
+                        dict["coordinates information"]["y-coords label"],
+                        dict["time information"]["label name"],
+                        dict[label],
+                        t_type
+                    )
+
+            # If the netCDF is structured
+            else:
+                x_data, y_data, t_data, z_data = \
+                    IOTools.import_transient_regular_scalar_nc(
+                        self,
+                        wave_fpath,
+                        dict["coordinates information"]["x-coords label"],
+                        dict["coordinates information"]["y-coords label"],
+                        dict["time information"]["label name"],
+                        dict[label],
+                        t_type,
+                        dict["coordinates information"]["full coords record"]
+                    )
+
+            # Process time information
+            t_data = TimeTools.process_nc_time_info(
+                self,
+                t_data,
+                start_time,
+                dict["time information"]["format"],
+                dict["time information"]["timezone"]
+            )
+
+            if label == "hs label":
+                # Create hs interpolator
+                self.hs_int = \
+                    SetupTools.create_transient_scalar_interpolator(
+                        self,
+                        x_data, y_data, t_data, z_data,
+                        dict["coordinates information"]["rotated grid"]
+                    )
+            elif label == "wlen label":
+                self.wlen_int = \
+                    SetupTools.create_transient_scalar_interpolator(
+                        self,
+                        x_data, y_data, t_data, z_data,
+                        dict["coordinates information"]["rotated grid"]
+                    )
+            elif label == "dir label":
+                self.dir_int = \
+                    SetupTools.create_transient_scalar_interpolator(
+                        self,
+                        x_data, y_data, t_data, z_data,
+                        dict["coordinates information"]["rotated grid"]
+                    )
+
+            elif label == "qb label":
+                self.qb_int = \
+                    SetupTools.create_transient_scalar_interpolator(
+                        self,
+                        x_data, y_data, t_data, z_data,
+                        dict["coordinates information"]["rotated grid"]
+                    )
+
+        # Check that we have the necessary interpolators
+        # TO-DO
+
+        # Interpolate the wave characteristics
+        WEoCTools.interpolate_wave_char(self, 0)
+
+        return
+
+
+
+    def interpolate_wave_char(self, t ):
+        """
+
+        Args:
+            t:
+            z_int:
+            coeff:
+
+        Returns:
+
+        """
+        # Create an array for the time dimension
+        t = np.ones((np.shape(self.hs.dat.data)[0], 1)) * t
+
+        # Concatenate all the coordinates in one array
+        points = np.concatenate((t, self.wave_coords), axis=1)
+
+
+        # Interpolate
+        self.hs.dat.data[:] = self.hs_int(points)
+        self.dir.dat.data[:] = self.dir_int(points)
+        self.wlen.dat.data[:] = self.wlen_int(points)
+        self.qb.dat.data[:] = self.qb_int(points)
+
+        return
+
+
+
+
 
 
 
