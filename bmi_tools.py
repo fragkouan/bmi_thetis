@@ -626,7 +626,7 @@ class CoordsTools(BmiThetis):
         """
         # If the wind forcing utilise the same epsg as the mesh
         if dict["epsg"] == self.config["mesh parameters"]["epsg"]:
-            self.swan_coords = self.yx
+            self.swan_coords = self.xy
 
         # If the wind netcdf utilises a different than the mesh
         else:
