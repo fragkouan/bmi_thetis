@@ -2531,7 +2531,7 @@ class ThetisTools(BmiThetis):
             "uv_velocities_ic"
         ]
         BmiThetis._ic_wave_names = [
-            "hs_old",
+            "hwave_old",
             "dir_old",
             "qb_old",
             "wlen_old"
@@ -2797,7 +2797,7 @@ class ThetisTools(BmiThetis):
             if "WEoC" in self.config:
                 print_output("  * Add WEoC")
                 self.weoc.update(
-                    hs_wave=self.hs,
+                    h_wave=self.hwave,
                     dir_wave=self.dir,
                     l_wave=self.wlen,
                     qb=self.qb,
@@ -2806,7 +2806,7 @@ class ThetisTools(BmiThetis):
             else:
                 print_output("  * Add WCI")
                 self.weoc.update(
-                    hs_wave=self.hs_old,
+                    h_wave=self.hwave_old,
                     dir_wave=self.dir_old,
                     l_wave=self.wlen_old,
                     qb=self.qb_old,
@@ -2894,7 +2894,7 @@ class ThetisTools(BmiThetis):
                 self.coupl_stat == "SWAN-to-Thetis"
         ):
             if (self.simul_kind == "ramp"):
-                self.hs_old.dat.data[:] = 0.
+                self.hwave_old.dat.data[:] = 0.
                 self.dir_old.dat.data[:] = 0.
                 self.wlen_old.dat.data[:] = 0.
                 self.qb_old.dat.data[:] = 0.
@@ -3014,8 +3014,6 @@ class ThetisTools(BmiThetis):
                 (self.u_velocity_ic, self.v_velocity_ic)
             )
 
-        # print(
-        #     f"{np.amin(self.hs_old.dat.data):.3f},{np.amax(self.hs_old.dat.data):.3f}")
 
         return
 
@@ -3418,17 +3416,17 @@ class WCITools(BmiThetis):
         None
 
         Returns:
-        self.hs   : A function for the significant wave height
+        self.hwave   : A function for the wave height
         self.dir  : A function for the mean wave direction
         self.wlen : A function for the mean wavelength
         self.qb   : A function for the percentage of wave breaking
         """
-        # Define array for the significant wave height Hs
-        self.hs = Function(self.P1_2d, name="significant_wave_height")
-        self.hs_old = Function(self.P1_2d, name="old_significant_wave_height")
-        self.hs_new = Function(self.P1_2d, name="new_significant_wave_height")
-        self.hs_diff = Function(
-            self.P1_2d, name="significant_wave_height_differences"
+        # Define array for the wave height
+        self.hwave = Function(self.P1_2d, name="wave_height")
+        self.hwave_old = Function(self.P1_2d, name="old_wave_height")
+        self.hwave_new = Function(self.P1_2d, name="new_wave_height")
+        self.hwave_diff = Function(
+            self.P1_2d, name="wave_height_differences"
         )
 
         # Define array for the mean wave direction
@@ -3890,14 +3888,14 @@ class WCITools(BmiThetis):
     def set_input_field(self, name, data):
         """
         """
-        if name == 'sea_surface_water_wave__significant_height':
+        if name == 'sea_surface_water_wave__height':
             if self.mpi_stat:
-                self.hs_new.dat.data[:] = data[
+                self.hwave_new.dat.data[:] = data[
                     self.mpi_start_ind[self.mpi_rank]:
                             self.mpi_end_ind[self.mpi_rank]
                     ]
             else:
-                self.hs_new.dat.data[:] = data
+                self.hwave_new.dat.data[:] = data
 
 
 
@@ -5773,7 +5771,7 @@ class WEoCTools(BmiThetis):
             "characteristics"
         ]
         BmiThetis._wave_labels_options = [
-            "hs label",
+            "hwave label",
             "wlen label",
             "dir label",
             "qb label"
@@ -5814,8 +5812,8 @@ class WEoCTools(BmiThetis):
         Returns:
 
         """
-        # Setup the functions for Hs, Dir, WLen and Qb
-        self.hs = Function(self.P1_2d, name="significant_wave_height")
+        # Setup the functions for H, Dir, WLen and Qb
+        self.hwave = Function(self.P1_2d, name="wave_height")
         self.dir = Function(self.P1_2d, name="mean_wave_direction")
         self.wlen = Function(self.P1_2d, name="mean_wavelength")
         self.qb = Function(self.P1_2d, name="wave_breaking_percentage")
@@ -5905,9 +5903,9 @@ class WEoCTools(BmiThetis):
                 dict["time information"]["timezone"]
             )
 
-            if label == "hs label":
-                # Create hs interpolator
-                self.hs_int = \
+            if label == "hwave label":
+                # Create hwave interpolator
+                self.hwave_int = \
                     SetupTools.create_transient_scalar_interpolator(
                         self,
                         x_data, y_data, t_data, z_data,
@@ -5958,14 +5956,14 @@ class WEoCTools(BmiThetis):
 
         """
         # Create an array for the time dimension
-        t = np.ones((np.shape(self.hs.dat.data)[0], 1)) * t
+        t = np.ones((np.shape(self.hwave.dat.data)[0], 1)) * t
 
         # Concatenate all the coordinates in one array
         points = np.concatenate((t, self.wave_coords), axis=1)
 
 
         # Interpolate
-        self.hs.dat.data[:] = self.hs_int(points)
+        self.hwave.dat.data[:] = self.hwave_int(points)
         self.dir.dat.data[:] = self.dir_int(points)
         self.wlen.dat.data[:] = self.wlen_int(points)
         self.qb.dat.data[:] = self.qb_int(points)

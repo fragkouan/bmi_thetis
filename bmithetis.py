@@ -29,7 +29,7 @@ class BmiThetis(Bmi):
         # use from other models implementing BMI, i.e. the names of the input
         # variables
         self._input_var_names = [
-            "sea_surface_water_wave__significant_height",
+            "sea_surface_water_wave__height",
             "sea_surface_water_wave__wavelength",
             "sea_surface_water_wave__direction",
             "sea_surface_water_wave__breaking_fraction"
@@ -60,7 +60,7 @@ class BmiThetis(Bmi):
         # Dictionary containing the units of the given variable, for both input
         # and output variables
         self._var_units = {
-            "sea_surface_water_wave__significant_height" : "m",
+            "sea_surface_water_wave__height" : "m",
             "sea_surface_water_wave__wavelength" : "m",
             "sea_surface_water_wave__direction" : "degrees",
             "sea_surface_water_wave__breaking_fraction" : "None",
@@ -253,7 +253,7 @@ class BmiThetis(Bmi):
         ):
             # Update the Wave Effects On Currents
             self.weoc.update(
-                hs_wave=self.hs,
+                h_wave=self.hwave,
                 dir_wave=self.dir,
                 l_wave=self.wlen,
                 qb=self.qb,
@@ -326,9 +326,9 @@ class BmiThetis(Bmi):
                 if self.wave_char_interp:
                     ## Calculate the new value of wave characteristics
                     # For the significant wave height
-                    self.hs.interpolate(
-                        self.hs_diff * Constant(self.wave_interp_counter) + \
-                        self.hs_old
+                    self.hwave.interpolate(
+                        self.hwave_diff * Constant(self.wave_interp_counter) + \
+                        self.hwave_old
                     )
                     # Fort the mean wave direction
                     self.dir.interpolate(
@@ -351,7 +351,7 @@ class BmiThetis(Bmi):
 
                     # Update the Wave Effects On Currents
                     self.weoc.update(
-                        hs_wave=self.hs,
+                        h_wave=self.hwave,
                         dir_wave=self.dir,
                         l_wave=self.wlen,
                         qb=self.qb,
@@ -361,7 +361,7 @@ class BmiThetis(Bmi):
             if "WEoC" in self.config:
                 # Update the Wave Effects On Currents
                 self.weoc.update(
-                    hs_wave=self.hs,
+                    h_wave=self.hwave,
                     dir_wave=self.dir,
                     l_wave=self.wlen,
                     qb=self.qb,
@@ -380,9 +380,9 @@ class BmiThetis(Bmi):
                 self.wave_interp_counter = 1
                 # Calculate the "step" of each wave characteristic at each
                 # point
-                self.hs_diff.interpolate(
+                self.hwave_diff.interpolate(
                     Constant(1 / self.no_wave_interp) * \
-                    (self.hs_new - self.hs_old)
+                    (self.hwave_new - self.hwave_old)
                 )
                 self.dir_diff.interpolate(
                     Constant(1 / self.no_wave_interp) * \
@@ -398,7 +398,7 @@ class BmiThetis(Bmi):
                 )
 
                 # Calculate the new value of wave characteristics
-                self.hs.interpolate(self.hs_old + self.hs_diff)
+                self.hwave.interpolate(self.hwave_old + self.hwave_diff)
                 self.dir.interpolate(self.dir_old + self.dir_diff)
                 self.qb.interpolate(self.qb_old + self.qb_diff)
                 self.wlen.interpolate(self.wlen_old + self.wlen_diff)
@@ -408,7 +408,7 @@ class BmiThetis(Bmi):
 
             # If Thetis dt = coupling dt
             else:
-                self.hs = self.hs_new
+                self.hwave = self.hwave_new
                 self.dir = self.dir_new
                 self.wlen = self.wlen_new
                 self.qb = self.qb_new
@@ -437,7 +437,7 @@ class BmiThetis(Bmi):
                 self.coupl_stat == "SWAN-to-Thetis"
         ):
             # Pass the "new" value, i.e. the final value to the old array
-            self.hs_old.interpolate(self.hs_new)
+            self.hwave_old.interpolate(self.hwave_new)
             self.dir_old.interpolate(self.dir_new)
             self.qb_old.interpolate(self.qb_new)
             self.wlen_old.interpolate(self.wlen_new)
@@ -479,9 +479,9 @@ class BmiThetis(Bmi):
                 # Export the significant waveheight
                 IOTools.export_h5(
                     self,
-                    self.hs,
-                    "hs",
-                    output_dir + "hs"
+                    self.hwave,
+                    "hwave",
+                    output_dir + "hwave"
                 )
                 # Export the mean wave direction
                 IOTools.export_h5(
@@ -523,9 +523,9 @@ class BmiThetis(Bmi):
                 # Export the significant waveheight
                 IOTools.export_h5(
                     self,
-                    self.hs,
-                    "hs",
-                    output_dir + "hs_" + time_info
+                    self.hwave,
+                    "hwave",
+                    output_dir + "hwave_" + time_info
                 )
                 # Export the mean wave direction
                 IOTools.export_h5(
